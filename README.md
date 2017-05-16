@@ -1,16 +1,6 @@
-# `blosc` - band-limited oscillators for pd
+# `expline` - exponential line generator
 
-pd-vanilla's limited support of musical oscillators necessitates more musical options.  blosc aims to help by providing the following anti-aliased oscillators:
-
-* `[saw~]`
-* `[square~]`
-* `[tri~]`
-
-Currently only `[saw~]` is functional.  `[square~]` and `[tri~]` will be developed soon.
-
-Sine-wave reference:
-- https://gist.github.com/wrl/9913185
-
+It's like `[line~]`, but exponential.
 
 The rest of this info comes from the [`helloworld`](https://github.com/pure-data/helloworld) example, and is left here so I don't forget how to build it in two years.
 
