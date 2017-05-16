@@ -6,7 +6,7 @@
 lib.name = expline~
 
 # input source file (class name == source file basename)
-class.sources = expilne~.c
+class.sources = expline~.c
 
 # all extra files to be included in binary distribution of the library
 datafiles = expline~-help.pd expline~-meta.pd README.md

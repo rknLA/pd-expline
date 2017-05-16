@@ -35,25 +35,17 @@
 # define LOWOFFSET 1    /* word offset to find LSB */
 #endif
 
-union tabfudge
-{
-    double tf_d;
-    int32_t tf_i[2];
-};
-
-/* The above ifdef and tabfudge comes from the d_osc.c file in the pd source */
- 
 /*************** saw~ ***************/
-static t_class *saw_tilde_class;
+static t_class *expline_tilde_class;
  
-typedef struct _saw_tilde {
+typedef struct _expline_tilde {
   t_object x_obj;
   t_float x_freq;
   t_float x_conv;
   double x_phase;
   double x_last_phase;
   t_outlet *x_out;
-} t_saw_tilde;
+} t_expline_tilde;
 
 double polyblep_sample(double phase, double phase_step)
 {
@@ -71,9 +63,9 @@ double polyblep_sample(double phase, double phase_step)
     return 0.0;
 }
 
-t_int *saw_tilde_perform(t_int *w)
+t_int *expline_tilde_perform(t_int *w)
 {
-    t_saw_tilde *x = (t_saw_tilde *)(w[1]);
+    t_expline_tilde *x = (t_expline_tilde *)(w[1]);
     /*
      * the osc frequency is automatically promoted to a signal, so we
      * pull it from *in_freq instead of from x_freq.  this is to allow
@@ -107,20 +99,20 @@ t_int *saw_tilde_perform(t_int *w)
     return (w+5);
 }
 
-void saw_tilde_dsp(t_saw_tilde *x, t_signal **sp)
+void expline_tilde_dsp(t_expline_tilde *x, t_signal **sp)
 {
     x->x_conv = 1./sp[0]->s_sr;
-    dsp_add(saw_tilde_perform, 4, x, sp[0]->s_vec, sp[1]->s_vec, sp[0]->s_n);
+    dsp_add(expline_tilde_perform, 4, x, sp[0]->s_vec, sp[1]->s_vec, sp[0]->s_n);
 }
 
-void saw_tilde_free(t_saw_tilde *x)
+void expline_tilde_free(t_expline_tilde *x)
 {
     outlet_free(x->x_out);
 }
  
-void *saw_tilde_new(t_floatarg f)
+void *expline_tilde_new(t_floatarg f)
 {  
-  t_saw_tilde  *x = (t_saw_tilde  *)pd_new(saw_tilde_class);
+  t_expline_tilde  *x = (t_expline_tilde  *)pd_new(expline_tilde_class);
   x->x_freq = f;
   x->x_out = outlet_new(&x->x_obj, &s_signal);
   x->x_conv = 0;
@@ -129,19 +121,19 @@ void *saw_tilde_new(t_floatarg f)
   return (void *)x;  
 }  
  
-void saw_tilde_setup(void)
+void expline_tilde_setup(void)
 {
-  saw_tilde_class = class_new(gensym("saw~"),
-        (t_newmethod)saw_tilde_new,
-        (t_method)saw_tilde_free,
-        sizeof(t_saw_tilde),
+  expline_tilde_class = class_new(gensym("saw~"),
+        (t_newmethod)expline_tilde_new,
+        (t_method)expline_tilde_free,
+        sizeof(t_expline_tilde),
         CLASS_DEFAULT,
         A_DEFFLOAT,
         0);
-  class_addmethod(saw_tilde_class,
-          (t_method)saw_tilde_dsp,
+  class_addmethod(expline_tilde_class,
+          (t_method)expline_tilde_dsp,
           gensym("dsp"),
           A_CANT,
           0);
-  CLASS_MAINSIGNALIN(saw_tilde_class, t_saw_tilde, x_freq);
+  CLASS_MAINSIGNALIN(expline_tilde_class, t_expline_tilde, x_freq);
 }
