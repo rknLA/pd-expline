@@ -1,139 +1,150 @@
+/* Copyright (c) 2017 Kevin Nelson
+ * Based on line~, which is Copyright (c) 1997-1999 Miller Puckette.
+ * For information on usage and redistribution, and for a DISCLAIMER OF ALL
+ * WARRANTIES, see the file, "LICENSE.txt," in this distribution.  */
+
 #include "m_pd.h"  
+#include "math.h"
 
-#define UNITBIT32 1572864.  /* 3*2^19; bit 32 has place value 1 */
-
-
-#if defined(__FreeBSD__) || defined(__APPLE__) || defined(__FreeBSD_kernel__) \
-    || defined(__OpenBSD__)
-#include <machine/endian.h>
-#endif
-
-#if defined(__linux__) || defined(__CYGWIN__) || defined(__GNU__) || \
-    defined(ANDROID)
-#include <endian.h>
-#endif
-
-#ifdef __MINGW32__
-#include <sys/param.h>
-#endif
-
-#ifdef _MSC_VER
-/* _MSVC lacks BYTE_ORDER and LITTLE_ENDIAN */
-#define LITTLE_ENDIAN 0x0001
-#define BYTE_ORDER LITTLE_ENDIAN
-#endif
-
-#if !defined(BYTE_ORDER) || !defined(LITTLE_ENDIAN) 
-#error No byte order defined                                                    
-#endif
-
-#if BYTE_ORDER == LITTLE_ENDIAN
-# define HIOFFSET 1                                                              
-# define LOWOFFSET 0                                                             
-#else                                                                           
-# define HIOFFSET 0    /* word offset to find MSB */
-# define LOWOFFSET 1    /* word offset to find LSB */
-#endif
-
-/*************** saw~ ***************/
+/* -------------------------- line~ ------------------------------ */
 static t_class *expline_tilde_class;
- 
-typedef struct _expline_tilde {
-  t_object x_obj;
-  t_float x_freq;
-  t_float x_conv;
-  double x_phase;
-  double x_last_phase;
-  t_outlet *x_out;
-} t_expline_tilde;
 
-double polyblep_sample(double phase, double phase_step)
+typedef struct _expline
 {
-    double t;
-    if (phase < phase_step) {
-        t = phase / phase_step;
-        return (t * 2) - (t * t) - 1.0;
-    }
+    t_object x_obj;
+    t_sample x_target; /* target value of ramp */
+    t_sample x_value; /* current value of ramp at block-borders */
+    t_sample x_biginc;
+    t_sample x_inc;
+    t_float x_1overn;
+    t_float x_dspticktomsec;
+    t_float x_inletvalue;
+    t_float x_inletwas;
+    int x_ticksleft;
+    int x_retarget;
+} t_expline;
 
-    if (phase > (1.0 - phase_step)) {
-        t = (phase - 1.0) / phase_step;
-        return (t * t) + (t * 2) + 1.0;
-    }
+static t_int *expline_tilde_perform(t_int *w)
+{
+    t_expline *x = (t_expline *)(w[1]);
+    t_sample *out = (t_sample *)(w[2]);
+    int n = (int)(w[3]);
+    t_sample f = x->x_value;
 
-    return 0.0;
+    if (PD_BIGORSMALL(f))
+            x->x_value = f = 0;
+    if (x->x_retarget)
+    {
+        int nticks = x->x_inletwas * x->x_dspticktomsec;
+        if (!nticks) nticks = 1;
+        x->x_ticksleft = nticks;
+        x->x_biginc = (x->x_target - x->x_value)/(t_float)nticks;
+        x->x_inc = x->x_1overn * x->x_biginc;
+        x->x_retarget = 0;
+    }
+    if (x->x_ticksleft)
+    {
+        t_sample f = x->x_value;
+        while (n--) *out++ = f, f += x->x_inc;
+        x->x_value += x->x_biginc;
+        x->x_ticksleft--;
+    }
+    else
+    {
+        t_sample g = x->x_value = x->x_target;
+        while (n--)
+            *out++ = g;
+    }
+    return (w+4);
 }
 
-t_int *expline_tilde_perform(t_int *w)
+/* TB: vectorized version */
+static t_int *expline_tilde_perf8(t_int *w)
 {
-    t_expline_tilde *x = (t_expline_tilde *)(w[1]);
-    /*
-     * the osc frequency is automatically promoted to a signal, so we
-     * pull it from *in_freq instead of from x_freq.  this is to allow
-     * signal-rate frequency changes.
-     */
-    t_sample *in_freq =  (t_sample *)(w[2]);
-    t_sample *out_osc = (t_sample *)(w[3]);
-    int num_samples = (int)(w[4]);
+    t_expline *x = (t_expline *)(w[1]);
+    t_sample *out = (t_sample *)(w[2]);
+    int n = (int)(w[3]);
+    t_sample f = x->x_value;
 
-    double conv = x->x_conv;
-    double last_phase = x->x_last_phase;
-    double curr_phase = x->x_phase;
-    double out_val;
-    double phase_step;
-
-    while (num_samples--)
+    if (PD_BIGORSMALL(f))
+        x->x_value = f = 0;
+    if (x->x_retarget)
     {
-        /* (osc freq / sample rate) */
-        phase_step = *in_freq++ * conv;
-        out_val = (1.0 - (2.0 * curr_phase));
-        out_val += polyblep_sample(curr_phase, phase_step);
-        *out_osc++ = out_val;
-        last_phase = curr_phase;
-        curr_phase += phase_step;
-        if (curr_phase > 1.0) {
-            curr_phase -= 1.0;
+        int nticks = x->x_inletwas * x->x_dspticktomsec;
+        if (!nticks) nticks = 1;
+        x->x_ticksleft = nticks;
+        x->x_biginc = (x->x_target - x->x_value)/(t_sample)nticks;
+        x->x_inc = x->x_1overn * x->x_biginc;
+        x->x_retarget = 0;
+    }
+    if (x->x_ticksleft)
+    {
+        t_sample f = x->x_value;
+        while (n--) *out++ = f, f += x->x_inc;
+        x->x_value += x->x_biginc;
+        x->x_ticksleft--;
+    }
+    else
+    {
+        t_sample f = x->x_value = x->x_target;
+        for (; n; n -= 8, out += 8)
+        {
+            out[0] = f; out[1] = f; out[2] = f; out[3] = f; 
+            out[4] = f; out[5] = f; out[6] = f; out[7] = f;
         }
     }
-    x->x_phase = curr_phase;
-    x->x_last_phase = last_phase;
-    return (w+5);
+    return (w+4);
 }
 
-void expline_tilde_dsp(t_expline_tilde *x, t_signal **sp)
+static void expline_tilde_float(t_expline *x, t_float f)
 {
-    x->x_conv = 1./sp[0]->s_sr;
-    dsp_add(expline_tilde_perform, 4, x, sp[0]->s_vec, sp[1]->s_vec, sp[0]->s_n);
+    if (x->x_inletvalue <= 0)
+    {
+        x->x_target = x->x_value = f;
+        x->x_ticksleft = x->x_retarget = 0;
+    }
+    else
+    {
+        x->x_target = f;
+        x->x_retarget = 1;
+        x->x_inletwas = x->x_inletvalue;
+        x->x_inletvalue = 0;
+    }
 }
 
-void expline_tilde_free(t_expline_tilde *x)
+static void expline_tilde_stop(t_expline *x)
 {
-    outlet_free(x->x_out);
+    x->x_target = x->x_value;
+    x->x_ticksleft = x->x_retarget = 0;
 }
- 
-void *expline_tilde_new(t_floatarg f)
-{  
-  t_expline_tilde  *x = (t_expline_tilde  *)pd_new(expline_tilde_class);
-  x->x_freq = f;
-  x->x_out = outlet_new(&x->x_obj, &s_signal);
-  x->x_conv = 0;
-  x->x_phase = 0;
-  x->x_last_phase = 0;
-  return (void *)x;  
-}  
- 
+
+static void expline_tilde_dsp(t_expline *x, t_signal **sp)
+{
+    if(sp[0]->s_n&7)
+        dsp_add(expline_tilde_perform, 3, x, sp[0]->s_vec, sp[0]->s_n);
+    else
+        dsp_add(expline_tilde_perf8, 3, x, sp[0]->s_vec, sp[0]->s_n);
+    x->x_1overn = 1./sp[0]->s_n;
+    x->x_dspticktomsec = sp[0]->s_sr / (1000 * sp[0]->s_n);
+}
+
+static void *expline_tilde_new(void)
+{
+    t_expline *x = (t_expline *)pd_new(expline_tilde_class);
+    outlet_new(&x->x_obj, gensym("signal"));
+    floatinlet_new(&x->x_obj, &x->x_inletvalue);
+    x->x_ticksleft = x->x_retarget = 0;
+    x->x_value = x->x_target = x->x_inletvalue = x->x_inletwas = 0;
+    return (x);
+}
+
 void expline_tilde_setup(void)
 {
-  expline_tilde_class = class_new(gensym("saw~"),
-        (t_newmethod)expline_tilde_new,
-        (t_method)expline_tilde_free,
-        sizeof(t_expline_tilde),
-        CLASS_DEFAULT,
-        A_DEFFLOAT,
-        0);
-  class_addmethod(expline_tilde_class,
-          (t_method)expline_tilde_dsp,
-          gensym("dsp"),
-          A_CANT,
-          0);
-  CLASS_MAINSIGNALIN(expline_tilde_class, t_expline_tilde, x_freq);
+    expline_tilde_class = class_new(gensym("expline~"), expline_tilde_new, 0,
+        sizeof(t_expline), 0, 0);
+    class_addfloat(expline_tilde_class, (t_method)expline_tilde_float);
+    class_addmethod(expline_tilde_class, (t_method)expline_tilde_dsp,
+        gensym("dsp"), A_CANT, 0);
+    class_addmethod(expline_tilde_class, (t_method)expline_tilde_stop,
+        gensym("stop"), 0);
 }
