@@ -14,15 +14,21 @@ typedef struct _expline
     t_object x_obj;
     t_sample x_target; /* target value of ramp */
     t_sample x_value; /* current value of ramp at block-borders */
+    double x_overshoot_mult;
+    double x_attack_coef;
     t_sample x_biginc;
     t_sample x_inc;
     t_float x_1overn;
     t_float x_dspticktomsec;
-    t_float x_inletvalue;
-    t_float x_inletwas;
+    t_float x_inlet_ramptime;
+    t_float x_inlet_ramptime_was;
+    t_float x_inlet_overshoot;
+    t_float x_inlet_overshoot_was;
     int x_ticksleft;
     int x_retarget;
 } t_expline;
+
+/* M_E is `e`.. and a double */
 
 static t_int *expline_tilde_perform(t_int *w)
 {
@@ -35,7 +41,7 @@ static t_int *expline_tilde_perform(t_int *w)
             x->x_value = f = 0;
     if (x->x_retarget)
     {
-        int nticks = x->x_inletwas * x->x_dspticktomsec;
+        int nticks = x->x_inlet_ramptime_was * x->x_dspticktomsec;
         if (!nticks) nticks = 1;
         x->x_ticksleft = nticks;
         x->x_biginc = (x->x_target - x->x_value)/(t_float)nticks;
@@ -70,7 +76,7 @@ static t_int *expline_tilde_perf8(t_int *w)
         x->x_value = f = 0;
     if (x->x_retarget)
     {
-        int nticks = x->x_inletwas * x->x_dspticktomsec;
+        int nticks = x->x_inlet_ramptime_was * x->x_dspticktomsec;
         if (!nticks) nticks = 1;
         x->x_ticksleft = nticks;
         x->x_biginc = (x->x_target - x->x_value)/(t_sample)nticks;
@@ -98,7 +104,14 @@ static t_int *expline_tilde_perf8(t_int *w)
 
 static void expline_tilde_float(t_expline *x, t_float f)
 {
-    if (x->x_inletvalue <= 0)
+    if (x->x_inlet_overshoot != x->x_inlet_overshoot_was)
+    {
+        x->x_inlet_overshoot_was = x->x_inlet_overshoot;
+        double overshoot_dest = 1.0 + x->x_inlet_overshoot;
+        x->x_overshoot_mult = M_E * overshoot_dest * overshoot_dest;
+    }
+
+    if (x->x_inlet_ramptime <= 0)
     {
         x->x_target = x->x_value = f;
         x->x_ticksleft = x->x_retarget = 0;
@@ -107,8 +120,8 @@ static void expline_tilde_float(t_expline *x, t_float f)
     {
         x->x_target = f;
         x->x_retarget = 1;
-        x->x_inletwas = x->x_inletvalue;
-        x->x_inletvalue = 0;
+        x->x_inlet_ramptime_was = x->x_inlet_ramptime;
+        x->x_inlet_ramptime = 0;
     }
 }
 
@@ -128,20 +141,22 @@ static void expline_tilde_dsp(t_expline *x, t_signal **sp)
     x->x_dspticktomsec = sp[0]->s_sr / (1000 * sp[0]->s_n);
 }
 
-static void *expline_tilde_new(void)
+static void *expline_tilde_new(t_floatarg overshoot)
 {
     t_expline *x = (t_expline *)pd_new(expline_tilde_class);
+    x->x_overshoot = overshoot;
     outlet_new(&x->x_obj, gensym("signal"));
-    floatinlet_new(&x->x_obj, &x->x_inletvalue);
+    floatinlet_new(&x->x_obj, &x->x_inlet_ramptime);
+    floatinlet_new(&x->x_obj, &x->x_inlet_overshoot);
     x->x_ticksleft = x->x_retarget = 0;
-    x->x_value = x->x_target = x->x_inletvalue = x->x_inletwas = 0;
+    x->x_value = x->x_target = x->x_inlet_ramptime = x->x_inlet_ramptime_was = x->x_inlet_overshoot = x->x_inlet_overshoot_was = 0;
     return (x);
 }
 
 void expline_tilde_setup(void)
 {
     expline_tilde_class = class_new(gensym("expline~"), expline_tilde_new, 0,
-        sizeof(t_expline), 0, 0);
+        sizeof(t_expline), CLASS_DEFAULT, A_DEFFLOAT, 0.1);
     class_addfloat(expline_tilde_class, (t_method)expline_tilde_float);
     class_addmethod(expline_tilde_class, (t_method)expline_tilde_dsp,
         gensym("dsp"), A_CANT, 0);
