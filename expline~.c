@@ -57,8 +57,9 @@ static t_int *expline_tilde_perform(t_int *w)
         t_sample g = x->x_value;
         while (n--) {
             *out++ = g;
-            sv = x->x_attack_coef * (x->x_overshoot_target - sv);
+            sv += x->x_attack_coef * (x->x_overshoot_target - sv);
             g = x->x_valoffset + (x->x_valmult * sv);
+            if (g > x->x_target) g = x->x_target;
         }
         x->x_value = g;
         x->x_scale_value = sv;
@@ -99,7 +100,7 @@ static t_int *expline_tilde_perf8(t_int *w)
         t_sample g = x->x_value;
         while (n--) {
             *out++ = g;
-            sv = x->x_attack_coef * (x->x_overshoot_target - sv);
+            sv += x->x_attack_coef * (x->x_overshoot_target - sv);
             g = x->x_valoffset + (x->x_valmult * sv);
         }
         x->x_value = g;
@@ -122,6 +123,8 @@ static void set_overshoot(t_expline *x, t_float overshoot)
 {
     x->x_inlet_overshoot_was = overshoot;
     x->x_overshoot_target = 1.0 + overshoot;
+    post("overshoot target: %f", x->x_overshoot_target);
+    post("e: %f", M_E);
     x->x_overshoot_mult = M_E * x->x_overshoot_target * x->x_overshoot_target;
 }
 
@@ -131,6 +134,7 @@ static void expline_tilde_float(t_expline *x, t_float f)
     {
         set_overshoot(x, x->x_inlet_overshoot);
     }
+    post("overshoot mult: %f", x->x_overshoot_mult);
 
     if (x->x_inlet_ramptime <= 0)
     {
@@ -146,6 +150,7 @@ static void expline_tilde_float(t_expline *x, t_float f)
         x->x_scale_value = 0.0;
         x->x_inlet_ramptime_was = x->x_inlet_ramptime;
         x->x_inlet_ramptime = 0;
+        post("ramp time: %f", x->x_inlet_ramptime_was);
     }
 }
 
@@ -165,7 +170,7 @@ static void expline_tilde_dsp(t_expline *x, t_signal **sp)
     x->x_dspticktomsec = x->x_samplespermsec / sp[0]->s_n;
 }
 
-static void *expline_tilde_new(t_floatarg overshoot)
+static void *expline_tilde_new(t_symbol *s, int argc, t_atom *argv)
 {
     t_expline *x = (t_expline *)pd_new(expline_tilde_class);
     outlet_new(&x->x_obj, gensym("signal"));
@@ -173,6 +178,17 @@ static void *expline_tilde_new(t_floatarg overshoot)
     floatinlet_new(&x->x_obj, &x->x_inlet_overshoot);
     x->x_ticksleft = x->x_retarget = 0;
     x->x_scale_value = x->x_value = x->x_target = x->x_inlet_ramptime = x->x_inlet_ramptime_was = x->x_inlet_overshoot = x->x_inlet_overshoot_was = 0;
+
+    t_float overshoot = 0.1;
+
+    switch(argc) {
+        case 1:
+            overshoot = atom_getfloat(argv);
+            break;
+        default:
+            break;
+    }
+
     set_overshoot(x, overshoot);
     return (x);
 }
