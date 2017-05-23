@@ -50,6 +50,8 @@ static t_int *expline_tilde_perform(t_int *w)
 
         double attack_samples = x->x_samplespermsec * x->x_inlet_ramptime_was;
         x->x_attack_coef = x->x_overshoot_mult / attack_samples;
+        post("attack samples: %f", attack_samples);
+        post("attack coef: %f", x->x_attack_coef);
         x->x_retarget = 0;
     }
     if (x->x_ticksleft)
@@ -58,8 +60,8 @@ static t_int *expline_tilde_perform(t_int *w)
         while (n--) {
             *out++ = g;
             sv += x->x_attack_coef * (x->x_overshoot_target - sv);
+            if (sv > 1.0) sv = 1.0;
             g = x->x_valoffset + (x->x_valmult * sv);
-            if (g > x->x_target) g = x->x_target;
         }
         x->x_value = g;
         x->x_scale_value = sv;
@@ -93,6 +95,8 @@ static t_int *expline_tilde_perf8(t_int *w)
 
         double attack_samples = x->x_samplespermsec * x->x_inlet_ramptime_was;
         x->x_attack_coef = x->x_overshoot_mult / attack_samples;
+        post("attack samples: %f", attack_samples);
+        post("attack coef: %f", x->x_attack_coef);
         x->x_retarget = 0;
     }
     if (x->x_ticksleft)
@@ -101,6 +105,7 @@ static t_int *expline_tilde_perf8(t_int *w)
         while (n--) {
             *out++ = g;
             sv += x->x_attack_coef * (x->x_overshoot_target - sv);
+            if (sv > 1.0) sv = 1.0;
             g = x->x_valoffset + (x->x_valmult * sv);
         }
         x->x_value = g;
@@ -130,6 +135,7 @@ static void set_overshoot(t_expline *x, t_float overshoot)
 
 static void expline_tilde_float(t_expline *x, t_float f)
 {
+    post("previous attack coef: %f", x->x_attack_coef);
     if (x->x_inlet_overshoot != x->x_inlet_overshoot_was)
     {
         set_overshoot(x, x->x_inlet_overshoot);
