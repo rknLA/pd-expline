@@ -42,6 +42,8 @@ typedef struct _expline
 static void recalc_attack(t_expline *x)
 {
     post("re-calculating attack");
+    post("sample rate old: %f new: %f", x->c_last_samplerate, x->x_samplespermsec);
+    post("dsptick old: %f new: %f", x->c_last_dspticksize, x->x_dspticktomsec);
     double attack_samples = x->x_samplespermsec * x->x_inlet_ramptime_was;
     x->x_attack_coef = 1.0 - exp(log(x->x_overshoot_ratio) / attack_samples);
     post("attack samples: %f", attack_samples);
@@ -91,6 +93,12 @@ static t_int *expline_tilde_perform(t_int *w)
         while (n--)
             *out++ = g;
     }
+
+    /* Cache the dsp block size / sample rate to determine if we need
+     * to recalculate the attack coeffient
+     */
+    x->c_last_samplerate = x->x_samplespermsec;
+    x->c_last_dspticksize = x->x_dspticktomsec;
     return (w+4);
 }
 
@@ -140,6 +148,12 @@ static t_int *expline_tilde_perf8(t_int *w)
             out[4] = g; out[5] = g; out[6] = g; out[7] = g;
         }
     }
+
+    /* Cache the dsp block size / sample rate to determine if we need
+     * to recalculate the attack coeffient
+     */
+    x->c_last_samplerate = x->x_samplespermsec;
+    x->c_last_dspticksize = x->x_dspticktomsec;
     return (w+4);
 }
 
@@ -192,12 +206,6 @@ static void expline_tilde_dsp(t_expline *x, t_signal **sp)
         dsp_add(expline_tilde_perform, 3, x, sp[0]->s_vec, sp[0]->s_n);
     else
         dsp_add(expline_tilde_perf8, 3, x, sp[0]->s_vec, sp[0]->s_n);
-
-    /* Cache the dsp block size / sample rate to determine if we need
-     * to recalculate the attack coeffient
-     */
-    x->c_last_samplerate = x->x_samplespermsec;
-    x->c_last_dspticksize = x->x_dspticktomsec;
 
     x->x_samplespermsec = sp[0]->s_sr / 1000;
     x->x_dspticktomsec = x->x_samplespermsec / sp[0]->s_n;
