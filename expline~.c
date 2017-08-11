@@ -12,16 +12,23 @@ static t_class *expline_tilde_class;
 typedef struct _expline
 {
     t_object x_obj;
-    t_sample x_target; /* target value of ramp */
-    t_sample x_value; /* current value of ramp at block-borders */
+    t_sample x_target; /* output target value of ramp */
+    t_sample x_value; /* current output value of ramp at block-borders */
+
     double x_scale_value; /* current value of 0-1 ramp at block-borders */
-    double x_overshoot_mult;
     double x_overshoot_target;
+    double x_overshoot_ratio;
     double x_attack_coef;
-    t_sample x_valoffset;
-    t_sample x_valmult;
+
+    t_float c_last_samplerate;
+    t_float c_last_dspticksize;
     t_float x_dspticktomsec;
     t_float x_samplespermsec;
+    int x_needs_overshoot_recalc;
+
+    t_sample x_valoffset;
+    t_sample x_valmult;
+
     t_float x_inlet_ramptime;
     t_float x_inlet_ramptime_was;
     t_float x_inlet_overshoot;
@@ -31,6 +38,16 @@ typedef struct _expline
 } t_expline;
 
 /* M_E is `e`.. and a double */
+
+static void recalc_attack(t_expline *x)
+{
+    post("re-calculating attack");
+    double attack_samples = x->x_samplespermsec * x->x_inlet_ramptime_was;
+    x->x_attack_coef = 1.0 - exp(log(x->x_overshoot_ratio) / attack_samples);
+    post("attack samples: %f", attack_samples);
+    post("attack coef: %f", x->x_attack_coef);
+    x->x_needs_overshoot_recalc = 0;
+}
 
 static t_int *expline_tilde_perform(t_int *w)
 {
@@ -47,15 +64,16 @@ static t_int *expline_tilde_perform(t_int *w)
         int nticks = x->x_inlet_ramptime_was * x->x_dspticktomsec;
         if (!nticks) nticks = 1;
         x->x_ticksleft = nticks;
-
-        double attack_samples = x->x_samplespermsec * x->x_inlet_ramptime_was;
-        x->x_attack_coef = x->x_overshoot_mult / attack_samples;
-        post("attack samples: %f", attack_samples);
-        post("attack coef: %f", x->x_attack_coef);
+        recalc_attack(x);
         x->x_retarget = 0;
     }
     if (x->x_ticksleft)
     {
+        if (x->x_needs_overshoot_recalc == 1 ||
+                (x->c_last_samplerate != x->x_samplespermsec) ||
+                (x->c_last_dspticksize != x->x_dspticktomsec)) {
+            recalc_attack(x);
+        }
         t_sample g = x->x_value;
         while (n--) {
             *out++ = g;
@@ -92,15 +110,16 @@ static t_int *expline_tilde_perf8(t_int *w)
         int nticks = x->x_inlet_ramptime_was * x->x_dspticktomsec;
         if (!nticks) nticks = 1;
         x->x_ticksleft = nticks;
-
-        double attack_samples = x->x_samplespermsec * x->x_inlet_ramptime_was;
-        x->x_attack_coef = x->x_overshoot_mult / attack_samples;
-        post("attack samples: %f", attack_samples);
-        post("attack coef: %f", x->x_attack_coef);
+        recalc_attack(x);
         x->x_retarget = 0;
     }
     if (x->x_ticksleft)
     {
+        if (x->x_needs_overshoot_recalc == 1 ||
+                (x->c_last_samplerate != x->x_samplespermsec) ||
+                (x->c_last_dspticksize != x->x_dspticktomsec)) {
+            recalc_attack(x);
+        }
         t_sample g = x->x_value;
         while (n--) {
             *out++ = g;
@@ -128,9 +147,9 @@ static void set_overshoot(t_expline *x, t_float overshoot)
 {
     x->x_inlet_overshoot_was = overshoot;
     x->x_overshoot_target = 1.0 + overshoot;
+    x->x_overshoot_ratio = overshoot / x->x_overshoot_target;
     post("overshoot target: %f", x->x_overshoot_target);
-    post("e: %f", M_E);
-    x->x_overshoot_mult = M_E * x->x_overshoot_target * x->x_overshoot_target;
+    x->x_needs_overshoot_recalc = 1;
 }
 
 static void expline_tilde_float(t_expline *x, t_float f)
@@ -140,15 +159,16 @@ static void expline_tilde_float(t_expline *x, t_float f)
     {
         set_overshoot(x, x->x_inlet_overshoot);
     }
-    post("overshoot mult: %f", x->x_overshoot_mult);
 
     if (x->x_inlet_ramptime <= 0)
     {
+        /* handle the "set to this value now" case */
         x->x_target = x->x_value = f;
         x->x_ticksleft = x->x_retarget = x->x_scale_value = 0;
     }
     else
     {
+        /* ramp to a new target */
         x->x_target = f;
         x->x_valoffset = x->x_value;
         x->x_valmult = f - x->x_value;
@@ -172,6 +192,13 @@ static void expline_tilde_dsp(t_expline *x, t_signal **sp)
         dsp_add(expline_tilde_perform, 3, x, sp[0]->s_vec, sp[0]->s_n);
     else
         dsp_add(expline_tilde_perf8, 3, x, sp[0]->s_vec, sp[0]->s_n);
+
+    /* Cache the dsp block size / sample rate to determine if we need
+     * to recalculate the attack coeffient
+     */
+    x->c_last_samplerate = x->x_samplespermsec;
+    x->c_last_dspticksize = x->x_dspticktomsec;
+
     x->x_samplespermsec = sp[0]->s_sr / 1000;
     x->x_dspticktomsec = x->x_samplespermsec / sp[0]->s_n;
 }
